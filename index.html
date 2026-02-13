@@ -360,23 +360,66 @@
         </div>
     </div>
 
-    <script>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, doc, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Firebase Initialization
+        const firebaseConfig = JSON.parse(__firebase_config);
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'truck-fund-tracker';
+
         const TRUCK_GOAL = 50000;
         const INITIAL_SAVINGS = 0; 
         let CONTRIBUTORS = [];
         let isLoggedIn = false;
         let editId = null;
+        let user = null;
 
         let currentSort = 'top';
         let searchTerm = '';
 
-        // Helper to format date
+        // Authentication Logic
+        const initAuth = async () => {
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                await signInWithCustomToken(auth, __initial_auth_token);
+            } else {
+                await signInAnonymously(auth);
+            }
+        };
+
+        onAuthStateChanged(auth, (u) => {
+            user = u;
+            if (user) setupDataListener();
+        });
+
+        initAuth();
+
+        // Firestore Listener
+        const setupDataListener = () => {
+            const contributorsCol = collection(db, 'artifacts', appId, 'public', 'data', 'contributors');
+            onSnapshot(contributorsCol, (snapshot) => {
+                CONTRIBUTORS = snapshot.docs.map(doc => ({
+                    id: doc.id,
+                    ...doc.data(),
+                    date: doc.data().date?.toDate() || new Date()
+                }));
+                updateTracker();
+            }, (error) => {
+                console.error("Firestore Error:", error);
+            });
+        };
+
+        // UI Helpers
         function formatDate(dateObj) {
             const options = { month: 'short', day: 'numeric', year: 'numeric' };
             return new Date(dateObj).toLocaleDateString('en-US', options);
         }
 
-        function renderContributors() {
+        window.renderContributors = function() {
             const list = document.getElementById('contributor-list');
             list.innerHTML = '';
             
@@ -387,8 +430,7 @@
             if (currentSort === 'top') {
                 filtered.sort((a, b) => b.amount - a.amount);
             } else {
-                // Recent sort (descending by ID/Timestamp)
-                filtered.sort((a, b) => b.id - a.id);
+                filtered.sort((a, b) => b.date - a.date);
             }
 
             if (filtered.length === 0 && searchTerm !== '') {
@@ -422,13 +464,13 @@
                             <span class="text-[10px] text-slate-500 font-mono">${formatDate(item.date)}</span>
                         </div>
                     </div>
-                    <span class="text-sm font-mono font-black text-emerald-400">+$${item.amount.toLocaleString()}</span>
+                    <span class="text-sm font-mono font-black text-emerald-400">+$${Number(item.amount).toLocaleString()}</span>
                 `;
                 list.appendChild(div);
             });
-        }
+        };
 
-        function updateTracker() {
+        window.updateTracker = function() {
             const totalContributions = CONTRIBUTORS.reduce((sum, c) => sum + Number(c.amount), 0);
             const currentTotal = INITIAL_SAVINGS + totalContributions;
             const percentage = Math.min((currentTotal / TRUCK_GOAL) * 100, 100);
@@ -442,16 +484,16 @@
                 document.getElementById('truck-marker').style.left = percentage + '%';
             }, 300);
 
-            renderContributors();
-        }
+            window.renderContributors();
+        };
 
-        // Admin Auth
+        // Admin Actions
         document.getElementById('login-trigger').addEventListener('click', () => {
             if (isLoggedIn) {
                 isLoggedIn = false;
                 document.getElementById('admin-add-btn').classList.add('hidden');
                 document.getElementById('login-trigger').innerText = '2026';
-                updateTracker();
+                window.renderContributors();
             } else {
                 document.getElementById('login-modal').style.display = 'flex';
             }
@@ -462,9 +504,9 @@
         });
 
         document.getElementById('login-submit').addEventListener('click', () => {
-            const user = document.getElementById('login-user').value;
-            const pass = document.getElementById('login-pass').value;
-            if (user === 'lukeamotion' && pass === '9719E1D19F') {
+            const u = document.getElementById('login-user').value;
+            const p = document.getElementById('login-pass').value;
+            if (u === 'lukeamotion' && p === '9719E1D19F') {
                 isLoggedIn = true;
                 document.getElementById('login-modal').style.display = 'none';
                 document.getElementById('admin-add-btn').classList.remove('hidden');
@@ -472,13 +514,12 @@
                 document.getElementById('login-user').value = '';
                 document.getElementById('login-pass').value = '';
                 document.getElementById('login-error').classList.add('hidden');
-                updateTracker();
+                window.renderContributors();
             } else {
                 document.getElementById('login-error').classList.remove('hidden');
             }
         });
 
-        // Contributor Management
         document.getElementById('admin-add-btn').addEventListener('click', () => {
             editId = null;
             document.getElementById('modal-title').innerText = 'Add Contributor';
@@ -491,26 +532,27 @@
             document.getElementById('contributor-modal').style.display = 'none';
         });
 
-        document.getElementById('modal-save').addEventListener('click', () => {
-            const user = document.getElementById('edit-user').value;
-            const amount = Number(document.getElementById('edit-amount').value);
-            
+        document.getElementById('modal-save').addEventListener('click', async () => {
             if (!user) return;
+            const userStr = document.getElementById('edit-user').value;
+            const amountVal = Number(document.getElementById('edit-amount').value);
+            
+            if (!userStr) return;
+
+            const contributorsCol = collection(db, 'artifacts', appId, 'public', 'data', 'contributors');
 
             if (editId) {
-                const index = CONTRIBUTORS.findIndex(c => c.id === editId);
-                CONTRIBUTORS[index] = { ...CONTRIBUTORS[index], user, amount };
+                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'contributors', editId);
+                await updateDoc(docRef, { user: userStr, amount: amountVal });
             } else {
-                CONTRIBUTORS.push({
-                    id: Date.now().toString(),
-                    user,
-                    amount,
+                await addDoc(contributorsCol, {
+                    user: userStr,
+                    amount: amountVal,
                     date: new Date()
                 });
             }
             
             document.getElementById('contributor-modal').style.display = 'none';
-            updateTracker();
         });
 
         window.openEditModal = (id) => {
@@ -522,32 +564,32 @@
             document.getElementById('contributor-modal').style.display = 'flex';
         };
 
-        window.removeContributor = (id) => {
-            CONTRIBUTORS = CONTRIBUTORS.filter(c => c.id !== id);
-            updateTracker();
+        window.removeContributor = async (id) => {
+            if (!user) return;
+            const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'contributors', id);
+            await deleteDoc(docRef);
         };
 
         // UI Listeners
         document.getElementById('search-input').addEventListener('input', (e) => {
             searchTerm = e.target.value;
-            renderContributors();
+            window.renderContributors();
         });
 
         document.getElementById('sort-top').addEventListener('click', () => {
             currentSort = 'top';
             document.getElementById('sort-top').classList.add('active', 'text-emerald-400');
             document.getElementById('sort-recent').classList.remove('active', 'text-emerald-400');
-            renderContributors();
+            window.renderContributors();
         });
 
         document.getElementById('sort-recent').addEventListener('click', () => {
             currentSort = 'recent';
             document.getElementById('sort-recent').classList.add('active', 'text-emerald-400');
             document.getElementById('sort-top').classList.remove('active', 'text-emerald-400');
-            renderContributors();
+            window.renderContributors();
         });
 
-        window.onload = updateTracker;
     </script>
 </body>
 </html>
