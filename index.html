@@ -4,10 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Buck for a Truck | Charging Tracker</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Tilt+Neon&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Tilt+Neon&display=swap');
-        
         body {
             font-family: 'Inter', sans-serif;
             background-color: #020617;
@@ -138,19 +139,21 @@
             position: relative;
             border-radius: 10px;
             box-shadow: 0 0 20px rgba(16, 185, 129, 0.4);
+            will-change: width;
         }
 
         .truck-marker {
             position: absolute;
-            top: 50%; 
+            top: 50%;
             left: 0%;
-            transform: translate(-50%, -50%); 
+            transform: translate(-50%, -50%);
             z-index: 30;
             transition: left 2s cubic-bezier(0.34, 1.56, 0.64, 1);
             display: flex;
             flex-direction: column;
             align-items: center;
             pointer-events: none;
+            will-change: left;
         }
 
         .truck-icon-img {
@@ -265,7 +268,7 @@
                     <div id="progress-bar" class="progress-bar"></div>
                     
                     <div id="truck-marker" class="truck-marker">
-                        <img src="https://i.imgur.com/yf5Ft16.png" alt="Driving Caricature" class="truck-icon-img">
+                        <img src="https://i.imgur.com/yf5Ft16.png" alt="Driving Caricature" class="truck-icon-img" loading="lazy" decoding="async">
                     </div>
                 </div>
             </div>
@@ -377,8 +380,8 @@
 
         // APP CONFIG
         const TRUCK_GOAL = 50000;
-        const INITIAL_SAVINGS = 0; 
-        
+        const INITIAL_SAVINGS = 0;
+
         let CONTRIBUTORS = [];
         let isLoggedIn = false;
         let editId = null;
@@ -387,43 +390,76 @@
         let currentSort = 'top';
         let searchTerm = '';
 
-        // UI Helpers
-        const showModal = (id) => {
-            const el = document.getElementById(id);
-            if(el) el.style.display = 'flex';
+        // Cached DOM references — avoids repeated getElementById on every render
+        const $list = document.getElementById('contributor-list');
+        const $currentDisplay = document.getElementById('current-display');
+        const $percentDisplay = document.getElementById('percentage-display');
+        const $progressBar = document.getElementById('progress-bar');
+        const $truckMarker = document.getElementById('truck-marker');
+        const $adminAddBtn = document.getElementById('admin-add-btn');
+        const $loginTrigger = document.getElementById('login-trigger');
+        const $loginUser = document.getElementById('login-user');
+        const $loginPass = document.getElementById('login-pass');
+        const $loginError = document.getElementById('login-error');
+        const $modalTitle = document.getElementById('modal-title');
+        const $editUser = document.getElementById('edit-user');
+        const $editAmount = document.getElementById('edit-amount');
+        const $modalSave = document.getElementById('modal-save');
+        const $sortTop = document.getElementById('sort-top');
+        const $sortRecent = document.getElementById('sort-recent');
+        const $loginModal = document.getElementById('login-modal');
+        const $contributorModal = document.getElementById('contributor-modal');
+
+        // Hoisted statics
+        const DATE_FORMAT_OPTS = { month: 'short', day: 'numeric', year: 'numeric' };
+
+        // XSS-safe text escaping
+        const escapeHTML = (str) => {
+            const el = document.createElement('span');
+            el.textContent = str;
+            return el.innerHTML;
         };
-        const hideModal = (id) => {
-            const el = document.getElementById(id);
-            if(el) el.style.display = 'none';
+
+        // UI Helpers
+        const showModal = (el) => { if (el) el.style.display = 'flex'; };
+        const hideModal = (el) => { if (el) el.style.display = 'none'; };
+
+        // Debounce utility
+        const debounce = (fn, ms) => {
+            let timer;
+            return (...args) => {
+                clearTimeout(timer);
+                timer = setTimeout(() => fn(...args), ms);
+            };
         };
 
         // ADMIN TRIGGER
-        document.getElementById('login-trigger').addEventListener('click', () => {
+        $loginTrigger.addEventListener('click', () => {
             if (isLoggedIn) {
                 isLoggedIn = false;
-                document.getElementById('admin-add-btn').classList.add('hidden');
-                document.getElementById('login-trigger').innerText = '2026';
+                $adminAddBtn.classList.add('hidden');
+                $loginTrigger.innerText = '2026';
                 window.renderContributors();
             } else {
-                showModal('login-modal');
+                showModal($loginModal);
             }
         });
 
-        document.getElementById('login-cancel').addEventListener('click', () => hideModal('login-modal'));
+        document.getElementById('login-cancel').addEventListener('click', () => hideModal($loginModal));
         document.getElementById('login-submit').addEventListener('click', () => {
-            const u = document.getElementById('login-user').value;
-            const p = document.getElementById('login-pass').value;
+            const u = $loginUser.value;
+            const p = $loginPass.value;
             if (u === 'lukeamotion' && p === '9719E1D19F') {
                 isLoggedIn = true;
-                hideModal('login-modal');
-                document.getElementById('admin-add-btn').classList.remove('hidden');
-                document.getElementById('login-trigger').innerText = 'Admin Active';
-                document.getElementById('login-user').value = '';
-                document.getElementById('login-pass').value = '';
-                document.getElementById('login-error').classList.add('hidden');
+                hideModal($loginModal);
+                $adminAddBtn.classList.remove('hidden');
+                $loginTrigger.innerText = 'Admin Active';
+                $loginUser.value = '';
+                $loginPass.value = '';
+                $loginError.classList.add('hidden');
                 window.renderContributors();
             } else {
-                document.getElementById('login-error').classList.remove('hidden');
+                $loginError.classList.remove('hidden');
             }
         });
 
@@ -472,43 +508,45 @@
         };
 
         function formatDate(dateObj) {
-            const options = { month: 'short', day: 'numeric', year: 'numeric' };
-            return new Date(dateObj).toLocaleDateString('en-US', options);
+            return new Date(dateObj).toLocaleDateString('en-US', DATE_FORMAT_OPTS);
         }
 
         window.renderContributors = function() {
-            const list = document.getElementById('contributor-list');
-            if(!list) return;
-            list.innerHTML = '';
-            
-            let filtered = CONTRIBUTORS.filter(item => 
-                (item.user || '').toLowerCase().includes(searchTerm.toLowerCase())
+            if (!$list) return;
+            $list.innerHTML = '';
+
+            const term = searchTerm.toLowerCase();
+            let filtered = CONTRIBUTORS.filter(item =>
+                (item.user || '').toLowerCase().includes(term)
             );
 
             if (currentSort === 'top') {
-                filtered.sort((a, b) => b.amount - a.amount);
+                filtered.sort((a, b) => (b.amount || 0) - (a.amount || 0));
             } else {
                 filtered.sort((a, b) => b.date - a.date);
             }
 
             if (filtered.length === 0 && searchTerm !== '') {
-                list.innerHTML = `<div class="col-span-full py-10 text-center text-slate-600 italic text-sm">No contributors found matching "${searchTerm}"</div>`;
+                $list.innerHTML = `<div class="col-span-full py-10 text-center text-slate-600 italic text-sm">No contributors found matching "${escapeHTML(searchTerm)}"</div>`;
                 return;
             } else if (filtered.length === 0) {
-                list.innerHTML = `<div class="col-span-full py-10 text-center text-slate-600 italic text-sm tracking-widest uppercase">Grid inactive • Awaiting Power</div>`;
+                $list.innerHTML = `<div class="col-span-full py-10 text-center text-slate-600 italic text-sm tracking-widest uppercase">Grid inactive &bull; Awaiting Power</div>`;
                 return;
             }
 
+            const frag = document.createDocumentFragment();
             filtered.forEach(item => {
                 const div = document.createElement('div');
                 div.className = 'contributor-card p-4 rounded-xl flex justify-between items-center group';
-                
+
+                const safeUser = escapeHTML(item.user || '');
+                const safeId = escapeHTML(item.id);
                 const adminTools = isLoggedIn ? `
                     <div class="flex gap-2 mr-2">
-                        <button onclick="openEditModal('${item.id}')" class="p-1.5 text-slate-500 hover:text-emerald-400 bg-slate-800/50 rounded transition-colors">
+                        <button data-action="edit" data-id="${safeId}" class="p-1.5 text-slate-500 hover:text-emerald-400 bg-slate-800/50 rounded transition-colors">
                             <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
                         </button>
-                        <button onclick="removeContributor('${item.id}')" class="p-1.5 text-slate-500 hover:text-red-400 bg-slate-800/50 rounded transition-colors">
+                        <button data-action="delete" data-id="${safeId}" class="p-1.5 text-slate-500 hover:text-red-400 bg-slate-800/50 rounded transition-colors">
                             <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
                         </button>
                     </div>
@@ -518,54 +556,59 @@
                     <div class="flex items-center">
                         ${adminTools}
                         <div class="flex flex-col">
-                            <span class="text-xs font-semibold text-slate-300 tracking-wide">${item.user}</span>
+                            <span class="text-xs font-semibold text-slate-300 tracking-wide">${safeUser}</span>
                             <span class="text-[10px] text-slate-500 font-mono">${formatDate(item.date)}</span>
                         </div>
                     </div>
                     <span class="text-sm font-mono font-black text-emerald-400">+$${Number(item.amount || 0).toLocaleString()}</span>
                 `;
-                list.appendChild(div);
+                frag.appendChild(div);
             });
+            $list.appendChild(frag);
         };
+
+        // Event delegation for admin edit/delete buttons (avoids inline onclick)
+        $list.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-action]');
+            if (!btn) return;
+            const id = btn.dataset.id;
+            if (btn.dataset.action === 'edit') window.openEditModal(id);
+            else if (btn.dataset.action === 'delete') window.removeContributor(id);
+        });
 
         window.updateTracker = function() {
             const totalContributions = CONTRIBUTORS.reduce((sum, c) => sum + Number(c.amount || 0), 0);
             const currentTotal = INITIAL_SAVINGS + totalContributions;
             const percentage = Math.min((currentTotal / TRUCK_GOAL) * 100, 100);
 
-            const display = document.getElementById('current-display');
-            const percentEl = document.getElementById('percentage-display');
-            if(display) display.innerText = '$' + currentTotal.toLocaleString();
-            if(percentEl) percentEl.innerText = Math.floor(percentage) + '%';
+            if ($currentDisplay) $currentDisplay.innerText = '$' + currentTotal.toLocaleString();
+            if ($percentDisplay) $percentDisplay.innerText = Math.floor(percentage) + '%';
 
-            setTimeout(() => {
-                const bar = document.getElementById('progress-bar');
-                const marker = document.getElementById('truck-marker');
-                if(bar) bar.style.width = percentage + '%';
-                if(marker) marker.style.left = percentage + '%';
-            }, 300);
+            requestAnimationFrame(() => {
+                if ($progressBar) $progressBar.style.width = percentage + '%';
+                if ($truckMarker) $truckMarker.style.left = percentage + '%';
+            });
 
             window.renderContributors();
         };
 
         // Modal Management
-        document.getElementById('admin-add-btn').addEventListener('click', () => {
+        $adminAddBtn.addEventListener('click', () => {
             editId = null;
-            document.getElementById('modal-title').innerText = 'Add Contributor';
-            document.getElementById('edit-user').value = '';
-            document.getElementById('edit-amount').value = '';
-            showModal('contributor-modal');
+            $modalTitle.innerText = 'Add Contributor';
+            $editUser.value = '';
+            $editAmount.value = '';
+            showModal($contributorModal);
         });
 
-        document.getElementById('modal-cancel').addEventListener('click', () => hideModal('contributor-modal'));
+        document.getElementById('modal-cancel').addEventListener('click', () => hideModal($contributorModal));
 
-        document.getElementById('modal-save').addEventListener('click', async () => {
-            const saveBtn = document.getElementById('modal-save');
-            const userStr = document.getElementById('edit-user').value.trim();
-            const amountVal = Number(document.getElementById('edit-amount').value);
-            
+        $modalSave.addEventListener('click', async () => {
+            const userStr = $editUser.value.trim();
+            const amountVal = Number($editAmount.value);
+
             if (!userStr) return;
-            
+
             // Safety check for user auth
             if (!user) {
                 console.log("Re-initializing auth...");
@@ -576,8 +619,8 @@
                 }
             }
 
-            saveBtn.innerText = 'Saving...';
-            saveBtn.classList.add('btn-disabled');
+            $modalSave.innerText = 'Saving...';
+            $modalSave.classList.add('btn-disabled');
 
             try {
                 if (editId) {
@@ -591,12 +634,12 @@
                         date: serverTimestamp()
                     });
                 }
-                hideModal('contributor-modal');
+                hideModal($contributorModal);
             } catch (e) {
                 console.error("Save error:", e);
             } finally {
-                saveBtn.innerText = 'Save';
-                saveBtn.classList.remove('btn-disabled');
+                $modalSave.innerText = 'Save';
+                $modalSave.classList.remove('btn-disabled');
             }
         });
 
@@ -604,15 +647,15 @@
             const item = CONTRIBUTORS.find(c => c.id === id);
             if (!item) return;
             editId = id;
-            document.getElementById('modal-title').innerText = 'Edit Contributor';
-            document.getElementById('edit-user').value = item.user;
-            document.getElementById('edit-amount').value = item.amount;
-            showModal('contributor-modal');
+            $modalTitle.innerText = 'Edit Contributor';
+            $editUser.value = item.user;
+            $editAmount.value = item.amount;
+            showModal($contributorModal);
         };
 
         window.removeContributor = async (id) => {
             if (!user) return;
-            if (!confirm("Remove this entry?")) return; // Custom simple confirmation
+            if (!confirm("Remove this entry?")) return;
             const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'contributors', id);
             try {
                 await deleteDoc(docRef);
@@ -621,23 +664,23 @@
             }
         };
 
-        // Filter Controls
-        document.getElementById('search-input').addEventListener('input', (e) => {
+        // Filter Controls (search is debounced at 150ms)
+        document.getElementById('search-input').addEventListener('input', debounce((e) => {
             searchTerm = e.target.value;
             window.renderContributors();
-        });
+        }, 150));
 
-        document.getElementById('sort-top').addEventListener('click', () => {
+        $sortTop.addEventListener('click', () => {
             currentSort = 'top';
-            document.getElementById('sort-top').classList.add('active', 'text-emerald-400');
-            document.getElementById('sort-recent').classList.remove('active', 'text-emerald-400');
+            $sortTop.classList.add('active', 'text-emerald-400');
+            $sortRecent.classList.remove('active', 'text-emerald-400');
             window.renderContributors();
         });
 
-        document.getElementById('sort-recent').addEventListener('click', () => {
+        $sortRecent.addEventListener('click', () => {
             currentSort = 'recent';
-            document.getElementById('sort-recent').classList.add('active', 'text-emerald-400');
-            document.getElementById('sort-top').classList.remove('active', 'text-emerald-400');
+            $sortRecent.classList.add('active', 'text-emerald-400');
+            $sortTop.classList.remove('active', 'text-emerald-400');
             window.renderContributors();
         });
 
