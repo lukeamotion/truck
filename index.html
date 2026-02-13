@@ -64,7 +64,8 @@
             text-shadow: 0 0 5px #ff3131, 0 0 10px #ff3131;
             cursor: pointer;
             transition: all 0.3s;
-            padding: 10px;
+            display: inline-block;
+            padding: 20px; /* Larger hit area */
         }
         .neon-red-sm:hover {
             opacity: 0.7;
@@ -215,11 +216,12 @@
             inset: 0;
             background: rgba(2, 6, 23, 0.95);
             backdrop-filter: blur(12px);
-            z-index: 9999; /* Max priority */
+            z-index: 10000; /* Ensure this is highest */
             display: none;
             align-items: center;
             justify-content: center;
             padding: 20px;
+            pointer-events: auto;
         }
     </style>
 </head>
@@ -368,13 +370,7 @@
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, doc, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Global environment variables
-        const firebaseConfig = JSON.parse(__firebase_config);
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'truck-fund-tracker-persistent';
-
+        // APP CONFIG
         const TRUCK_GOAL = 50000;
         const INITIAL_SAVINGS = 0; 
         
@@ -382,24 +378,75 @@
         let isLoggedIn = false;
         let editId = null;
         let user = null;
+        let db, auth, appId;
         let currentSort = 'top';
         let searchTerm = '';
 
-        // Authentication & Initialization
-        const initAuth = async () => {
-            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                await signInWithCustomToken(auth, __initial_auth_token);
-            } else {
-                await signInAnonymously(auth);
-            }
+        // UI Helpers
+        const showModal = (id) => {
+            const el = document.getElementById(id);
+            if(el) el.style.display = 'flex';
+        };
+        const hideModal = (id) => {
+            const el = document.getElementById(id);
+            if(el) el.style.display = 'none';
         };
 
-        onAuthStateChanged(auth, (u) => {
-            user = u;
-            if (user) setupDataListener();
+        // ADMIN TRIGGER ATTACHED IMMEDIATELY
+        document.getElementById('login-trigger').addEventListener('click', () => {
+            if (isLoggedIn) {
+                isLoggedIn = false;
+                document.getElementById('admin-add-btn').classList.add('hidden');
+                document.getElementById('login-trigger').innerText = '2026';
+                window.renderContributors();
+            } else {
+                showModal('login-modal');
+            }
         });
 
-        initAuth();
+        document.getElementById('login-cancel').addEventListener('click', () => hideModal('login-modal'));
+        document.getElementById('login-submit').addEventListener('click', () => {
+            const u = document.getElementById('login-user').value;
+            const p = document.getElementById('login-pass').value;
+            if (u === 'lukeamotion' && p === '9719E1D19F') {
+                isLoggedIn = true;
+                hideModal('login-modal');
+                document.getElementById('admin-add-btn').classList.remove('hidden');
+                document.getElementById('login-trigger').innerText = 'Admin Active';
+                document.getElementById('login-user').value = '';
+                document.getElementById('login-pass').value = '';
+                document.getElementById('login-error').classList.add('hidden');
+                window.renderContributors();
+            } else {
+                document.getElementById('login-error').classList.remove('hidden');
+            }
+        });
+
+        // Initialize Firebase
+        try {
+            const firebaseConfig = JSON.parse(__firebase_config);
+            const app = initializeApp(firebaseConfig);
+            auth = getAuth(app);
+            db = getFirestore(app);
+            appId = typeof __app_id !== 'undefined' ? __app_id : 'truck-fund-tracker-v1';
+
+            const initAuth = async () => {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            };
+
+            onAuthStateChanged(auth, (u) => {
+                user = u;
+                if (user) setupDataListener();
+            });
+
+            initAuth();
+        } catch (e) {
+            console.error("Firebase startup failed:", e);
+        }
 
         const setupDataListener = () => {
             const contributorsCol = collection(db, 'artifacts', appId, 'public', 'data', 'contributors');
@@ -415,7 +462,6 @@
             });
         };
 
-        // UI Helpers
         function formatDate(dateObj) {
             const options = { month: 'short', day: 'numeric', year: 'numeric' };
             return new Date(dateObj).toLocaleDateString('en-US', options);
@@ -423,6 +469,7 @@
 
         window.renderContributors = function() {
             const list = document.getElementById('contributor-list');
+            if(!list) return;
             list.innerHTML = '';
             
             let filtered = CONTRIBUTORS.filter(item => 
@@ -477,55 +524,22 @@
             const currentTotal = INITIAL_SAVINGS + totalContributions;
             const percentage = Math.min((currentTotal / TRUCK_GOAL) * 100, 100);
 
-            document.getElementById('current-display').innerText = '$' + currentTotal.toLocaleString();
-            document.getElementById('percentage-display').innerText = Math.floor(percentage) + '%';
-            document.getElementById('status-display').innerText = 'Goal: $' + TRUCK_GOAL.toLocaleString();
+            const display = document.getElementById('current-display');
+            const percentEl = document.getElementById('percentage-display');
+            if(display) display.innerText = '$' + currentTotal.toLocaleString();
+            if(percentEl) percentEl.innerText = Math.floor(percentage) + '%';
 
             setTimeout(() => {
-                document.getElementById('progress-bar').style.width = percentage + '%';
-                document.getElementById('truck-marker').style.left = percentage + '%';
+                const bar = document.getElementById('progress-bar');
+                const marker = document.getElementById('truck-marker');
+                if(bar) bar.style.width = percentage + '%';
+                if(marker) marker.style.left = percentage + '%';
             }, 300);
 
             window.renderContributors();
         };
 
-        // Modal Controls
-        const showModal = (id) => document.getElementById(id).style.display = 'flex';
-        const hideModal = (id) => document.getElementById(id).style.display = 'none';
-
-        // Login Logic
-        document.getElementById('login-trigger').addEventListener('click', () => {
-            if (isLoggedIn) {
-                isLoggedIn = false;
-                document.getElementById('admin-add-btn').classList.add('hidden');
-                document.getElementById('login-trigger').innerText = '2026';
-                window.renderContributors();
-            } else {
-                showModal('login-modal');
-            }
-        });
-
-        document.getElementById('login-cancel').addEventListener('click', () => hideModal('login-modal'));
-
-        document.getElementById('login-submit').addEventListener('click', () => {
-            const u = document.getElementById('login-user').value;
-            const p = document.getElementById('login-pass').value;
-            if (u === 'lukeamotion' && p === '9719E1D19F') {
-                isLoggedIn = true;
-                hideModal('login-modal');
-                document.getElementById('admin-add-btn').classList.remove('hidden');
-                document.getElementById('login-trigger').innerText = 'Admin Active';
-                // Clear inputs
-                document.getElementById('login-user').value = '';
-                document.getElementById('login-pass').value = '';
-                document.getElementById('login-error').classList.add('hidden');
-                window.renderContributors();
-            } else {
-                document.getElementById('login-error').classList.remove('hidden');
-            }
-        });
-
-        // Contributor Management Logic
+        // Modal Management
         document.getElementById('admin-add-btn').addEventListener('click', () => {
             editId = null;
             document.getElementById('modal-title').innerText = 'Add Contributor';
@@ -558,7 +572,6 @@
             hideModal('contributor-modal');
         });
 
-        // Expose functions to global for onclick handlers
         window.openEditModal = (id) => {
             const item = CONTRIBUTORS.find(c => c.id === id);
             if (!item) return;
