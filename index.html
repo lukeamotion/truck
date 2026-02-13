@@ -65,7 +65,7 @@
             cursor: pointer;
             transition: all 0.3s;
             display: inline-block;
-            padding: 20px; /* Larger hit area */
+            padding: 20px;
         }
         .neon-red-sm:hover {
             opacity: 0.7;
@@ -216,12 +216,17 @@
             inset: 0;
             background: rgba(2, 6, 23, 0.95);
             backdrop-filter: blur(12px);
-            z-index: 10000; /* Ensure this is highest */
+            z-index: 10000;
             display: none;
             align-items: center;
             justify-content: center;
             padding: 20px;
             pointer-events: auto;
+        }
+
+        .btn-disabled {
+            opacity: 0.5;
+            pointer-events: none;
         }
     </style>
 </head>
@@ -392,7 +397,7 @@
             if(el) el.style.display = 'none';
         };
 
-        // ADMIN TRIGGER ATTACHED IMMEDIATELY
+        // ADMIN TRIGGER
         document.getElementById('login-trigger').addEventListener('click', () => {
             if (isLoggedIn) {
                 isLoggedIn = false;
@@ -431,10 +436,14 @@
             appId = typeof __app_id !== 'undefined' ? __app_id : 'truck-fund-tracker-v1';
 
             const initAuth = async () => {
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    await signInWithCustomToken(auth, __initial_auth_token);
-                } else {
-                    await signInAnonymously(auth);
+                try {
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                        await signInWithCustomToken(auth, __initial_auth_token);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                } catch (e) {
+                    console.error("Auth init failed:", e);
                 }
             };
 
@@ -551,25 +560,44 @@
         document.getElementById('modal-cancel').addEventListener('click', () => hideModal('contributor-modal'));
 
         document.getElementById('modal-save').addEventListener('click', async () => {
-            if (!user) return;
+            const saveBtn = document.getElementById('modal-save');
             const userStr = document.getElementById('edit-user').value.trim();
             const amountVal = Number(document.getElementById('edit-amount').value);
             
             if (!userStr) return;
-
-            if (editId) {
-                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'contributors', editId);
-                await updateDoc(docRef, { user: userStr, amount: amountVal });
-            } else {
-                const contributorsCol = collection(db, 'artifacts', appId, 'public', 'data', 'contributors');
-                await addDoc(contributorsCol, {
-                    user: userStr,
-                    amount: amountVal,
-                    date: new Date()
-                });
-            }
             
-            hideModal('contributor-modal');
+            // Safety check for user auth
+            if (!user) {
+                console.log("Re-initializing auth...");
+                await signInAnonymously(auth);
+                if (!auth.currentUser) {
+                    console.error("Unable to save: Database not ready.");
+                    return;
+                }
+            }
+
+            saveBtn.innerText = 'Saving...';
+            saveBtn.classList.add('btn-disabled');
+
+            try {
+                if (editId) {
+                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'contributors', editId);
+                    await updateDoc(docRef, { user: userStr, amount: amountVal });
+                } else {
+                    const contributorsCol = collection(db, 'artifacts', appId, 'public', 'data', 'contributors');
+                    await addDoc(contributorsCol, {
+                        user: userStr,
+                        amount: amountVal,
+                        date: serverTimestamp()
+                    });
+                }
+                hideModal('contributor-modal');
+            } catch (e) {
+                console.error("Save error:", e);
+            } finally {
+                saveBtn.innerText = 'Save';
+                saveBtn.classList.remove('btn-disabled');
+            }
         });
 
         window.openEditModal = (id) => {
@@ -584,8 +612,13 @@
 
         window.removeContributor = async (id) => {
             if (!user) return;
+            if (!confirm("Remove this entry?")) return; // Custom simple confirmation
             const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'contributors', id);
-            await deleteDoc(docRef);
+            try {
+                await deleteDoc(docRef);
+            } catch (e) {
+                console.error("Delete error:", e);
+            }
         };
 
         // Filter Controls
